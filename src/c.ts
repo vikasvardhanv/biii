@@ -735,7 +735,139 @@ export default function EditWorkflow() {
           </div>
         </div>
 
-        import React, { useState, useEffect } from 'react';
+        {/* Right Panel - Workflow Details */}
+        <div className="w-1/3 p-4 overflow-auto bg-gray-50">
+          {/* Tab navigation for right panel */}
+          <div className="flex border-b border-gray-200 mb-4">
+            <button
+              className={`px-4 py-2 text-sm font-medium ${rightPanelTab === 'details' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setRightPanelTab('details')}
+            >
+              Details
+            </button>
+            <button
+              className={`px-4 py-2 text-sm font-medium ${rightPanelTab === 'json' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setRightPanelTab('json')}
+            >
+              JSON
+            </button>
+          </div>
+          
+          {rightPanelTab === 'details' ? (
+            <>
+              <div className="bg-white rounded-lg shadow-sm mb-4">
+                <div className="p-4">
+                  <h2 className="text-sm font-medium text-gray-700 mb-4">Workflow Key</h2>
+                  
+                  {/* Name and Description fields */}
+                  <div className="mb-4">
+                    <label htmlFor="workflowName" className="block text-sm font-medium text-gray-700">
+                      Name *
+                    </label>
+                    <input
+                      type="text"
+                      id="workflowName"
+                      value={workflowName}
+                      onChange={(e) => setWorkflowName(e.target.value)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      placeholder="Workflow name"
+                    />
+                  </div>
+                  <div className="mb-4">
+                    <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                      Description *
+                    </label>
+                    <textarea
+                      id="description"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={2}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      placeholder="Describe the purpose of this workflow"
+                    />
+                  </div>
+                  
+                  <div className="mb-4">
+                    <label htmlFor="status" className="block text-sm font-medium text-gray-700">
+                      Status
+                    </label>
+                    <select
+                      id="status"
+                      value={workflowStatus}
+                      onChange={(e) => setWorkflowStatus(e.target.value as 'pending' | 'approved' | 'review')}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="review">Review</option>
+                    </select>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    {renderFormField('market')}
+                    {renderFormField('language')}
+                    {renderFormField('client')}
+                    {renderFormField('channel')}
+                    {renderFormField('page')}
+                    {renderFormField('placement')}
+                    {renderFormField('domain')}
+                  </div>
+                  <div className="text-sm text-gray-500 mt-4 p-2 bg-gray-50 rounded border border-gray-200">
+                    <span className="font-medium">Generated Key:</span> {generateKey() || <span className="italic text-gray-400">Complete selections above to generate key</span>}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            // JSON tab for right panel
+            <div className="bg-white rounded-lg shadow-sm mb-4 h-[calc(100%-60px)]">
+              <div className="p-4 h-full">
+                <h2 className="text-sm font-medium text-gray-700 mb-4">Workflow JSON</h2>
+                <pre className="bg-gray-50 p-4 rounded-md overflow-auto text-sm h-[calc(100%-40px)]">
+                  {JSON.stringify(createCompleteWorkflow(), null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isExportDisabled}
+              >
+                <Download size={20} />
+                Export
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaveDisabled}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save size={20} />
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
+
+
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, Edit2, Code, FileText } from 'lucide-react';
 import type { WorkflowNode, WorkflowEdge, Workflow, WorkflowKey } from '../types';
