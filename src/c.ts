@@ -18,99 +18,102 @@ const createNodeHierarchy = () => {
   const rootNodes = nodes.filter(node =>
     !incomingConnections.get(node.id) || incomingConnections.get(node.id)!.size === 0
   );
-  
-  // Helper to build the node tree recursively
-  const buildNodeTree = (nodeId: string, visited: Set<string> = new Set()): any => {
-    if (visited.has(nodeId)) return null;
-    visited.add(nodeId);
 
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node) return null;
-
-    const outgoing = connectionMap.get(nodeId) ? Array.from(connectionMap.get(nodeId)!) : [];
-
-    // If node is Fork, collect all outgoing as forkTasks
-    if (node.text === "Fork") {
-      const forkTasks = outgoing
-        .map(childId => buildNodeTree(childId, new Set(visited)))
-        .filter(Boolean);
-
-      const result: any = {
-        nodeName: node.text,
-        inputParameters: node.inputParameters ?? [],
-        retryCount: node.retryCount ?? 1,
-        retryDelaySeconds: node.retryDelaySeconds ?? 1,
-        timeoutMilliseconds: node.timeoutMilliseconds ?? 1000
-      };
-      if (node.url && node.url.trim() !== '') {
-        result.url = node.url.trim();
-      }
-      if (node.headers && Object.keys(node.headers).length > 0) {
-        result.headers = node.headers;
-      }
-      if (forkTasks.length > 0) {
-        result.forkTasks = forkTasks;
-      }
-      return result;
-    } else {
-      // Not a Fork: just return the node, do not add children
-      const result: any = {
-        nodeName: node.text,
-        inputParameters: node.inputParameters ?? [],
-        retryCount: node.retryCount ?? 1,
-        retryDelaySeconds: node.retryDelaySeconds ?? 1,
-        timeoutMilliseconds: node.timeoutMilliseconds ?? 1000
-      };
-      if (node.url && node.url.trim() !== '') {
-        result.url = node.url.trim();
-      }
-      if (node.headers && Object.keys(node.headers).length > 0) {
-        result.headers = node.headers;
-      }
-      // No children property for non-fork nodes
-      return result;
+  // Create basic node objects
+  const createNodeObject = (node: WorkflowNode) => {
+    const nodeObj: any = {
+      nodeName: node.text,
+      inputParameters: node.inputParameters ?? [],
+      retryCount: node.retryCount ?? 1,
+      retryDelaySeconds: node.retryDelaySeconds ?? 1,
+      timeoutMilliseconds: node.timeoutMilliseconds ?? 1000
+    };
+    
+    if (node.url && node.url.trim() !== '') {
+      nodeObj.url = node.url.trim();
     }
+    
+    if (node.headers && Object.keys(node.headers).length > 0) {
+      nodeObj.headers = node.headers;
+    }
+    
+    return nodeObj;
   };
 
-  // Build the main flow as a flat list
-  const result: any[] = [];
-  let currentNodes = [...rootNodes];
-  while (currentNodes.length > 0) {
-    const node = currentNodes.shift();
-    if (!node) break;
-    const nodeObj = buildNodeTree(node.id);
-    result.push(nodeObj);
+  // Track nodes for duplicate detection
+  const alreadyInForkTasks = new Set<string>();
+  const nodesInMainFlow = new Set<string>();
 
-    // For non-fork nodes, follow the first outgoing edge (if any) for the main flow
-    if (node.text !== "Fork") {
-      const outgoing = connectionMap.get(node.id) ? Array.from(connectionMap.get(node.id)!) : [];
+  // Process all nodes in the workflow
+  const result: any[] = [];
+
+  // First add root nodes
+  rootNodes.forEach(rootNode => {
+    const rootObj = createNodeObject(rootNode);
+    nodesInMainFlow.add(rootNode.id);
+    
+    // If this is a Fork node, handle its forkTasks
+    if (rootNode.text === "Fork") {
+      const outgoing = connectionMap.get(rootNode.id) ? Array.from(connectionMap.get(rootNode.id)!) : [];
+      
       if (outgoing.length > 0) {
-        const nextNode = nodes.find(n => n.id === outgoing[0]);
-        if (nextNode) currentNodes.unshift(nextNode);
+        rootObj.forkTasks = outgoing.map(childId => {
+          const childNode = nodes.find(n => n.id === childId);
+          if (!childNode) return null;
+          
+          // Create the fork task node object
+          const childObj = createNodeObject(childNode);
+          
+          // Mark this node as being in a fork task
+          alreadyInForkTasks.add(childId);
+          
+          return childObj;
+        }).filter(Boolean);
       }
     }
-  }
-
-  // Special handling for Delj node
-  // This ensures Delj is always included in the top-level workflow
-  const deljNode = nodes.find(n => n.text === "Delj");
-  if (deljNode) {
-    // Check if Delj is already in the result
-    const deljExists = result.some(node => node.nodeName === "Delj");
     
-    // If Delj doesn't exist in the result yet, add it
-    if (!deljExists) {
-      result.push({
-        nodeName: deljNode.text,
-        inputParameters: deljNode.inputParameters ?? [],
-        retryCount: deljNode.retryCount ?? 1,
-        retryDelaySeconds: deljNode.retryDelaySeconds ?? 1,
-        timeoutMilliseconds: deljNode.timeoutMilliseconds ?? 1000,
-        ...(deljNode.url && deljNode.url.trim() !== '' ? { url: deljNode.url.trim() } : {}),
-        ...(deljNode.headers && Object.keys(deljNode.headers).length > 0 ? { headers: deljNode.headers } : {})
-      });
+    result.push(rootObj);
+  });
+
+  // Then add any remaining nodes that are not already in fork tasks
+  // First find nodes that aren't root nodes or in fork tasks
+  const remainingNodeIds = nodes
+    .filter(node => !nodesInMainFlow.has(node.id) && !alreadyInForkTasks.has(node.id))
+    .map(node => node.id);
+  
+  // Sort these nodes by their dependency relationships if possible
+  const sortedRemainingNodes: string[] = [];
+  const visited = new Set<string>();
+  
+  // Simple topological sort
+  const visitNode = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+    
+    const outgoing = connectionMap.get(nodeId) ? Array.from(connectionMap.get(nodeId)!) : [];
+    outgoing.forEach(targetId => {
+      if (remainingNodeIds.includes(targetId)) {
+        visitNode(targetId);
+      }
+    });
+    
+    sortedRemainingNodes.push(nodeId);
+  };
+  
+  remainingNodeIds.forEach(nodeId => {
+    if (!visited.has(nodeId)) {
+      visitNode(nodeId);
     }
-  }
+  });
+  
+  // Add the sorted remaining nodes
+  sortedRemainingNodes.forEach(nodeId => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) {
+      const nodeObj = createNodeObject(node);
+      result.push(nodeObj);
+    }
+  });
 
   return result;
 };
