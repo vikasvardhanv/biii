@@ -953,3 +953,120 @@ export default function WorkflowDesigner({
     </div>
   );
 }
+
+
+
+
+
+
+============
+  
+
+
+// Add this function to your CreateWorkflow, EditWorkflow, and ViewWorkflow components
+// to ensure consistent handling of fork tasks when creating the workflow hierarchy
+
+const createNodeHierarchy = () => {
+  const sortedNodes = [...nodes].sort((a, b) => a.position.y - b.position.y);
+  
+  // Create a map of source nodes to their target nodes
+  const connectionMap = new Map<string, Set<string>>();
+  edges.forEach(edge => {
+    if (!connectionMap.has(edge.source)) {
+      connectionMap.set(edge.source, new Set<string>());
+    }
+    connectionMap.get(edge.source)!.add(edge.target);
+  });
+
+  // Map target nodes to their source nodes (incoming connections)
+  const incomingConnections = new Map<string, Set<string>>();
+  edges.forEach(edge => {
+    if (!incomingConnections.has(edge.target)) {
+      incomingConnections.set(edge.target, new Set<string>());
+    }
+    incomingConnections.get(edge.target)!.add(edge.source);
+  });
+
+  // Identify fork nodes (nodes with multiple incoming connections)
+  const forkNodes = new Set<string>();
+  incomingConnections.forEach((sources, nodeId) => {
+    if (sources.size > 1) {
+      forkNodes.add(nodeId);
+    }
+  });
+
+  // Find root nodes (nodes with no incoming connections)
+  const rootNodes = sortedNodes.filter(node =>
+    !incomingConnections.has(node.id) || incomingConnections.get(node.id)!.size === 0
+  );
+
+  // Process a node and its children recursively
+  const buildNodeTree = (nodeId: string, visited: Set<string> = new Set()): any => {
+    if (visited.has(nodeId)) return null;
+    visited.add(nodeId);
+
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return null;
+
+    const children = connectionMap.get(nodeId);
+
+    // Create base node result
+    const result: any = {
+      nodeName: node.text,
+      inputParameters: node.inputParameters ?? [],
+      retryCount: node.retryCount ?? 1,
+      retryDelaySeconds: node.retryDelaySeconds ?? 1,
+      timeoutMilliseconds: node.timeoutMilliseconds ?? 1000
+    };
+
+    if (node.url && node.url.trim() !== '') {
+      result.url = node.url.trim();
+    }
+
+    if (node.headers && Object.keys(node.headers).length > 0) {
+      result.headers = node.headers;
+    }
+
+    if (children && children.size > 0) {
+      const childrenNodes = Array.from(children)
+        .map(childId => nodes.find(n => n.id === childId))
+        .filter((n): n is WorkflowNode => !!n)
+        .sort((a, b) => a.position.y - b.position.y);
+      
+      // Separate fork tasks from regular tasks
+      const forkTasks: any[] = [];
+      const regularTasks: any[] = [];
+      
+      for (const child of childrenNodes) {
+        const childResult = buildNodeTree(child.id, new Set([...visited]));
+        if (!childResult) continue;
+        
+        // If the child is a fork node, add it to forkTasks
+        if (forkNodes.has(child.id)) {
+          forkTasks.push(childResult);
+        } else {
+          regularTasks.push(childResult);
+        }
+      }
+      
+      // Add regularTasks as children
+      if (regularTasks.length > 0) {
+        result.children = regularTasks;
+      }
+      
+      // Add forkTasks as forkTasks
+      if (forkTasks.length > 0) {
+        result.forkTasks = forkTasks;
+      }
+    }
+
+    return result;
+  };
+
+  const result = rootNodes
+    .sort((a, b) => a.position.y - b.position.y)
+    .map(node => buildNodeTree(node.id))
+    .filter(Boolean);
+
+  return result;
+};
