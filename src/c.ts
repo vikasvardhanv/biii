@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Save, ChevronDown, Upload, Plus, Trash2, Code, Settings, List, Workflow, FileJson } from 'lucide-react';
+import { ArrowLeft, Download, Save, ChevronDown, UploadIcon, Code, FileText } from 'lucide-react';
 import type { WorkflowKey, WorkflowNode, WorkflowEdge } from '../types';
 import WorkflowDesigner from '../components/WorkflowDesigner';
 import { fetchWorkflowOptions, getLanguagesForMarket, getClientsForMarket, getChannelsForClient, getPagesForChannel, getPlacementsForPage, getDomainsForPlacement } from '../services/workflowOptions';
@@ -8,7 +8,7 @@ import { fetchWorkflowOptions, getLanguagesForMarket, getClientsForMarket, getCh
 export default function CreateWorkflow() {
   const navigate = useNavigate();
   const [workflowName, setWorkflowName] = useState('');
-  const [workflowDescription, setWorkflowDescription] = useState('');
+  const [description, setDescription] = useState('');
   const [keyFields, setKeyFields] = useState<WorkflowKey>({
     market: '',
     language: '',
@@ -25,18 +25,7 @@ export default function CreateWorkflow() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const placementRef = useRef<HTMLDivElement>(null);
-  
-  const [inputParameters, setInputParameters] = useState<Array<{key: string, value: string}>>([
-    {key: 'saleOrderId', value: ''}
-  ]);
-  const [outputParameters, setOutputParameters] = useState<Array<{key: string, value: string}>>([]);
-  
-  const [timeoutSeconds, setTimeoutSeconds] = useState('0');
-  const [timeoutPolicy, setTimeoutPolicy] = useState('Alert Only');
-  const [failureWorkflowName, setFailureWorkflowName] = useState('');
-  const [isRestartable, setIsRestartable] = useState(true);
-  const [enableStatusListener, setEnableStatusListener] = useState(false);
-  const [enforceSchema, setEnforceSchema] = useState(false);
+  const [activeTab, setActiveTab] = useState('designer');
 
   const [workflowOptions, setWorkflowOptions] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -49,8 +38,18 @@ export default function CreateWorkflow() {
   const [availablePlacements, setAvailablePlacements] = useState<string[]>([]);
   const [availableDomains, setAvailableDomains] = useState<any[]>([]);
   const [filteredPlacements, setFilteredPlacements] = useState<string[]>([]);
-  const [configTab, setConfigTab] = useState('keyFields');
-  const [tasksCatalogTab, setTasksCatalogTab] = useState('all');
+
+  // Input/Output parameters
+  const [inputParameters, setInputParameters] = useState<{key: string, value: string}[]>([]);
+  const [outputParameters, setOutputParameters] = useState<{key: string, value: string}[]>([]);
+
+  // Workflow flags
+  const [isRestartable, setIsRestartable] = useState(false);
+  const [enforceSchema, setEnforceSchema] = useState(false);
+  const [timeoutSeconds, setTimeoutSeconds] = useState('0');
+  const [timeoutPolicy, setTimeoutPolicy] = useState('Alert Only');
+  const [failureWorkflowName, setFailureWorkflowName] = useState('');
+  const [statusListenerEnabled, setStatusListenerEnabled] = useState(false);
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -250,26 +249,37 @@ export default function CreateWorkflow() {
     return result;
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError('');
-
-    const payload = {
+  const createCompleteWorkflow = () => {
+    const workflow = {
       name: workflowName,
-      description: workflowDescription,
+      description: description,
       key: generateKey(),
       status: 'pending',
       workflow: createNodeHierarchy(),
       lastModified: new Date(),
-      inputParameters: inputParameters.filter(param => param.key.trim() !== ''),
-      outputParameters: outputParameters.filter(param => param.key.trim() !== ''),
-      timeoutSeconds: parseInt(timeoutSeconds) || 0,
-      timeoutPolicy: timeoutPolicy,
-      failureWorkflowName: failureWorkflowName,
-      isRestartable: isRestartable,
-      enableStatusListener: enableStatusListener,
-      enforceSchema: enforceSchema
+      inputParameters: inputParameters.filter(p => p.key.trim() !== '').map(p => p.key.trim()),
+      outputParameters: outputParameters.filter(p => p.key.trim() !== '').map(p => p.key.trim()),
+      flags: {
+        restartable: isRestartable,
+        enforceSchema: enforceSchema
+      },
+      timeoutSettings: {
+        timeoutSeconds: parseInt(timeoutSeconds) || 0,
+        timeoutPolicy: timeoutPolicy
+      },
+      failureWorkflow: failureWorkflowName,
+      statusListener: {
+        enabled: statusListenerEnabled
+      }
     };
+    return workflow;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError('');
+
+    const payload = createCompleteWorkflow();
 
     const headers: Headers = new Headers();
     headers.set('Content-Type', 'application/json');
@@ -300,23 +310,7 @@ export default function CreateWorkflow() {
   };
 
   const handleExport = () => {
-    const workflowKey = generateKey();
-    const workflow = {
-      name: workflowName,
-      description: workflowDescription,
-      status: 'pending',
-      key: workflowKey,
-      workflow: createNodeHierarchy(),
-      inputParameters: inputParameters.filter(param => param.key.trim() !== ''),
-      outputParameters: outputParameters.filter(param => param.key.trim() !== ''),
-      timeoutSeconds: parseInt(timeoutSeconds) || 0,
-      timeoutPolicy: timeoutPolicy,
-      failureWorkflowName: failureWorkflowName,
-      isRestartable: isRestartable,
-      enableStatusListener: enableStatusListener,
-      enforceSchema: enforceSchema
-    };
-
+    const workflow = createCompleteWorkflow();
     const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -403,17 +397,29 @@ export default function CreateWorkflow() {
             setNodes(nodes);
             setEdges(edges);
             setWorkflowName(json.name || '');
-            setWorkflowDescription(json.description || '');
-            
-            // Import additional workflow settings
-            if (json.inputParameters) setInputParameters(json.inputParameters);
-            if (json.outputParameters) setOutputParameters(json.outputParameters);
-            if (json.timeoutSeconds) setTimeoutSeconds(json.timeoutSeconds.toString());
-            if (json.timeoutPolicy) setTimeoutPolicy(json.timeoutPolicy);
-            if (json.failureWorkflowName) setFailureWorkflowName(json.failureWorkflowName);
-            if (json.isRestartable !== undefined) setIsRestartable(json.isRestartable);
-            if (json.enableStatusListener !== undefined) setEnableStatusListener(json.enableStatusListener);
-            if (json.enforceSchema !== undefined) setEnforceSchema(json.enforceSchema);
+            setDescription(json.description || '');
+
+            // Import other settings if available
+            if (json.inputParameters) {
+              setInputParameters(json.inputParameters.map((p: string) => ({ key: p, value: '' })));
+            }
+            if (json.outputParameters) {
+              setOutputParameters(json.outputParameters.map((p: string) => ({ key: p, value: '' })));
+            }
+            if (json.flags) {
+              setIsRestartable(json.flags.restartable || false);
+              setEnforceSchema(json.flags.enforceSchema || false);
+            }
+            if (json.timeoutSettings) {
+              setTimeoutSeconds(json.timeoutSettings.timeoutSeconds?.toString() || '0');
+              setTimeoutPolicy(json.timeoutSettings.timeoutPolicy || 'Alert Only');
+            }
+            if (json.failureWorkflow) {
+              setFailureWorkflowName(json.failureWorkflow);
+            }
+            if (json.statusListener) {
+              setStatusListenerEnabled(json.statusListener.enabled || false);
+            }
 
             if (json.key) {
               try {
@@ -448,7 +454,7 @@ export default function CreateWorkflow() {
                 alert("Error parsing key from JSON. Some dropdowns may not be populated.");
               }
             } else {
-              setKeyFields({ market: '', language: '', client: '', channel: '', page: '', placement: [], domain: ''});
+              setKeyFields({ market: '', language: '', client: '', channel: '', page: '', placement: [], domain: '' });
             }
           } else {
             alert('Invalid workflow file: "workflow" array not found.');
@@ -468,7 +474,7 @@ export default function CreateWorkflow() {
 
   const handleKeyFieldChange = (field: keyof WorkflowKey, value: string | string[]) => {
     setKeyFields(prev => {
-      const newKeyFields = {...prev, [field]: value};
+      const newKeyFields = { ...prev, [field]: value };
 
       const fields: (keyof WorkflowKey)[] = ['market', 'language', 'client', 'channel', 'page', 'placement', 'domain'];
       const index = fields.indexOf(field);
@@ -483,36 +489,36 @@ export default function CreateWorkflow() {
       return newKeyFields;
     });
   };
-  
+
   const addInputParameter = () => {
-    setInputParameters([...inputParameters, {key: '', value: ''}]);
+    setInputParameters([...inputParameters, { key: '', value: '' }]);
   };
-  
+
   const removeInputParameter = (index: number) => {
     const newParams = [...inputParameters];
     newParams.splice(index, 1);
     setInputParameters(newParams);
   };
-  
-  const updateInputParameter = (index: number, field: 'key' | 'value', value: string) => {
+
+  const updateInputParameter = (index: number, key: string) => {
     const newParams = [...inputParameters];
-    newParams[index][field] = value;
+    newParams[index].key = key;
     setInputParameters(newParams);
   };
-  
+
   const addOutputParameter = () => {
-    setOutputParameters([...outputParameters, {key: '', value: ''}]);
+    setOutputParameters([...outputParameters, { key: '', value: '' }]);
   };
-  
+
   const removeOutputParameter = (index: number) => {
     const newParams = [...outputParameters];
     newParams.splice(index, 1);
     setOutputParameters(newParams);
   };
-  
-  const updateOutputParameter = (index: number, field: 'key' | 'value', value: string) => {
+
+  const updateOutputParameter = (index: number, key: string) => {
     const newParams = [...outputParameters];
-    newParams[index][field] = value;
+    newParams[index].key = key;
     setOutputParameters(newParams);
   };
 
@@ -522,27 +528,27 @@ export default function CreateWorkflow() {
 
     switch (field) {
       case 'market':
-        options = availableMarkets.map(market => ({value: market.toUpperCase(), label: market.toUpperCase()}));
+        options = availableMarkets.map(market => ({ value: market.toUpperCase(), label: market.toUpperCase() }));
         disabled = loading;
         break;
       case 'language':
-        options = availableLanguages.map(language => ({value: language.toUpperCase(), label: language.toUpperCase()}));
+        options = availableLanguages.map(language => ({ value: language.toUpperCase(), label: language.toUpperCase() }));
         disabled = loading || !keyFields.market;
         break;
       case 'client':
-        options = availableClients.map((client : any) => ({value: client.CLIENT.toUpperCase(), label: client.CLIENT.toUpperCase()}));
+        options = availableClients.map((client: any) => ({ value: client.CLIENT.toUpperCase(), label: client.CLIENT.toUpperCase() }));
         disabled = loading || !keyFields.language;
         break;
       case 'channel':
-        options = availableChannels.map((channel : any)  => ({value: channel.toUpperCase(), label: channel.toUpperCase()}));
+        options = availableChannels.map((channel: any) => ({ value: channel.toUpperCase(), label: channel.toUpperCase() }));
         disabled = loading || !keyFields.client;
         break;
       case 'page':
-        options = availablePages.map((page : any) => ({value: page.PAGE.toUpperCase(), label: page.PAGE.toUpperCase()}));
+        options = availablePages.map((page: any) => ({ value: page.PAGE.toUpperCase(), label: page.PAGE.toUpperCase() }));
         disabled = loading || !keyFields.channel;
         break;
       case 'domain':
-        options = availableDomains.map((domain : any) => ({value: domain.DOMAIN.toUpperCase(), label: domain.DOMAIN.toUpperCase()}));
+        options = availableDomains.map((domain: any) => ({ value: domain.DOMAIN.toUpperCase(), label: domain.DOMAIN.toUpperCase() }));
         disabled = loading || keyFields.placement.length === 0;
         break;
       case 'placement': {
@@ -586,7 +592,7 @@ export default function CreateWorkflow() {
                           <input
                             type="checkbox"
                             checked={keyFields.placement.includes(option)}
-                            onChange={() => {}}
+                            onChange={() => { }}
                             className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                           />
                           <span className="ml-3">{option}</span>
@@ -630,25 +636,6 @@ export default function CreateWorkflow() {
     );
   };
 
-  const getWorkflowJson = () => {
-    const workflowKey = generateKey();
-    return {
-      name: workflowName,
-      description: workflowDescription,
-      status: 'pending',
-      key: workflowKey,
-      workflow: createNodeHierarchy(),
-      inputParameters: inputParameters.filter(param => param.key.trim() !== ''),
-      outputParameters: outputParameters.filter(param => param.key.trim() !== ''),
-      timeoutSeconds: parseInt(timeoutSeconds) || 0,
-      timeoutPolicy: timeoutPolicy,
-      failureWorkflowName: failureWorkflowName,
-      isRestartable: isRestartable,
-      enableStatusListener: enableStatusListener,
-      enforceSchema: enforceSchema
-    };
-  };
-
   const isSaveDisabled = !workflowName ||
     !keyFields.market ||
     !keyFields.language ||
@@ -661,6 +648,7 @@ export default function CreateWorkflow() {
     saving;
 
   const isExportDisabled = !workflowName ||
+    !keyFields.market ||
     !keyFields.language ||
     !keyFields.client ||
     !keyFields.channel ||
@@ -669,342 +657,312 @@ export default function CreateWorkflow() {
     !keyFields.domain ||
     nodes.length === 0;
 
-  const renderInputParametersTab = () => (
-    <div className="space-y-3 mb-6">
-      <h3 className="text-md font-medium mb-3">Input parameters</h3>
-      {inputParameters.map((param, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <div className="flex-grow">
-            <label className={index === 0 ? "block text-xs text-gray-500 mb-1" : "sr-only"}>
-              Key
-            </label>
-            <input
-              type="text"
-              value={param.key}
-              onChange={(e) => updateInputParameter(index, 'key', e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              placeholder="Parameter key"
-            />
-          </div>
-          <div className="flex-grow">
-            <label className={index === 0 ? "block text-xs text-gray-500 mb-1" : "sr-only"}>
-              Value
-            </label>
-            <input
-              type="text"
-              value={param.value}
-              onChange={(e) => updateInputParameter(index, 'value', e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              placeholder="Default value"
-            />
-          </div>
-          <div className="flex items-end h-10">
-            {index === 0 ? (
-              <button 
-                onClick={addInputParameter}
-                className="h-10 px-3 py-2 ml-2 bg-blue-600 text-white rounded-md flex items-center justify-center"
-              >
-                <Plus size={18} />
-              </button>
-            ) : (
-              <button 
-                onClick
-            ) : (
-              <button 
-                onClick={() => removeInputParameter(index)}
-                className="h-10 px-3 py-2 ml-2 bg-red-600 text-white rounded-md flex items-center justify-center"
-              >
-                <Trash2 size={18} />
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  const renderOutputParametersTab = () => (
-    <div className="space-y-3 mb-6">
-      <h3 className="text-md font-medium mb-3">Output parameters</h3>
-      {outputParameters.map((param, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <div className="flex-grow">
-            <label className={index === 0 ? "block text-xs text-gray-500 mb-1" : "sr-only"}>
-              Key
-            </label>
-            <input
-              type="text"
-              value={param.key}
-              onChange={(e) => updateOutputParameter(index, 'key', e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              placeholder="Parameter key"
-            />
-          </div>
-          <div className="flex-grow">
-            <label className={index === 0 ? "block text-xs text-gray-500 mb-1" : "sr-only"}>
-              Value
-            </label>
-            <input
-              type="text"
-              value={param.value}
-              onChange={(e) => updateOutputParameter(index, 'value', e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              placeholder="Default value"
-            />
-          </div>
-          <div className="flex items-end h-10">
-            {index === 0 ? (
-              <button 
-                onClick={addOutputParameter}
-                className="h-10 px-3 py-2 ml-2 bg-blue-600 text-white rounded-md flex items-center justify-center"
-              >
-                <Plus size={18} />
-              </button>
-            ) : (
-              <button 
-                onClick={() => removeOutputParameter(index)}
-                className="h-10 px-3 py-2 ml-2 bg-red-600 text-white rounded-md flex items-center justify-center"
-              >
-                <Trash2 size={18} />
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-      {outputParameters.length === 0 && (
-        <button 
-          onClick={addOutputParameter}
-          className="px-3 py-2 bg-blue-600 text-white rounded-md flex items-center justify-center"
-        >
-          <Plus size={18} className="mr-1" /> Add output parameter
-        </button>
-      )}
-    </div>
-  );
-
-  const renderSettingsTab = () => (
-    <div className="space-y-4 mb-6">
-      <h3 className="text-md font-medium mb-3">Workflow Settings</h3>
-      
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
-          Timeout (seconds)
-        </label>
-        <input
-          type="number"
-          value={timeoutSeconds}
-          onChange={(e) => setTimeoutSeconds(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          min="0"
-        />
-      </div>
-      
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
-          Timeout Policy
-        </label>
-        <select
-          value={timeoutPolicy}
-          onChange={(e) => setTimeoutPolicy(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-        >
-          <option value="Alert Only">Alert Only</option>
-          <option value="Retry">Retry</option>
-          <option value="Time Out">Time Out</option>
-        </select>
-      </div>
-      
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
-          Failure Workflow
-        </label>
-        <input
-          type="text"
-          value={failureWorkflowName}
-          onChange={(e) => setFailureWorkflowName(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          placeholder="Workflow name"
-        />
-      </div>
-      
-      <div className="space-y-4">
-        <div className="flex items-center">
-          <input
-            id="isRestartable"
-            type="checkbox"
-            checked={isRestartable}
-            onChange={(e) => setIsRestartable(e.target.checked)}
-            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-          />
-          <label htmlFor="isRestartable" className="ml-2 block text-sm text-gray-700">
-            Is Restartable
-          </label>
-        </div>
-        
-        <div className="flex items-center">
-          <input
-            id="enableStatusListener"
-            type="checkbox"
-            checked={enableStatusListener}
-            onChange={(e) => setEnableStatusListener(e.target.checked)}
-            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-          />
-          <label htmlFor="enableStatusListener" className="ml-2 block text-sm text-gray-700">
-            Enable Status Listener
-          </label>
-        </div>
-        
-        <div className="flex items-center">
-          <input
-            id="enforceSchema"
-            type="checkbox"
-            checked={enforceSchema}
-            onChange={(e) => setEnforceSchema(e.target.checked)}
-            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-          />
-          <label htmlFor="enforceSchema" className="ml-2 block text-sm text-gray-700">
-            Enforce Schema
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center">
-            <button 
-              className="mr-4 p-2 rounded-full hover:bg-gray-100"
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="container mx-auto px-4 py-3 flex justify-between items-center">
+          <div className="flex items-center space-x-4">
+            <button
               onClick={() => navigate('/')}
+              className="text-gray-600 hover:text-gray-900"
             >
               <ArrowLeft size={20} />
             </button>
-            <h1 className="text-lg font-semibold text-gray-900">Create Workflow</h1>
+            <h1 className="text-xl font-semibold text-gray-800">Create New Workflow</h1>
           </div>
-          <div className="flex space-x-3">
-            <input
-              type="file"
-              id="import-workflow"
-              accept=".json"
-              className="hidden"
-              onChange={handleImport}
-            />
-            <label
-              htmlFor="import-workflow"
-              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 cursor-pointer"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Import
-            </label>
-            <button
-              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={handleExport}
-              disabled={isExportDisabled}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </button>
-            <button
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={handleSave}
-              disabled={isSaveDisabled}
-            >
-              <Save className="mr-2 h-4 w-4" />
-              Save
-            </button>
+          <div className="flex items-center space-x-2">
+            <p className="text-sm text-gray-500">Last updated about 1 month ago</p>
+            <span className="text-sm text-gray-700">sample@example.com</span>
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Workflow Details</h2>
-          <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="workflow-name" className="block text-sm font-medium text-gray-700">
-                Workflow Name
-              </label>
-              <div className="mt-1">
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Panel - Workflow Designer */}
+        <div className="w-2/3 p-4 overflow-auto border-r border-gray-200">
+          <div className="bg-white rounded-lg shadow-sm overflow-hidden h-full">
+            <div className="flex border-b border-gray-200 bg-gray-50">
+              <button
+                className={`px-4 py-3 text-sm font-medium ${activeTab === 'designer' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setActiveTab('designer')}
+              >
+                <div className="flex items-center space-x-2">
+                  <FileText size={16} />
+                  <span>Workflow Designer</span>
+                </div>
+              </button>
+              <button
+                className={`px-4 py-3 text-sm font-medium ${activeTab === 'json' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setActiveTab('json')}
+              >
+                <div className="flex items-center space-x-2">
+                  <Code size={16} />
+                  <span>JSON</span>
+                </div>
+              </button>
+            </div>
+            
+            <div className="p-4 h-[calc(100%-48px)]">
+              {activeTab === 'designer' ? (
+                <WorkflowDesigner
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={setNodes}
+                  onEdgesChange={setEdges}
+                  nodeShape="rectangle"
+                  nodeBorderRadius={10}
+                />
+              ) : (
+                <pre className="bg-gray-50 p-4 rounded-md overflow-auto text-sm h-full">
+                  {JSON.stringify(createCompleteWorkflow(), null, 2)}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel - Workflow Details */}
+{/* Right Panel - Workflow Details */}
+        <div className="w-1/3 p-4 overflow-auto bg-gray-50">
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <div className="mb-4">
+                <label htmlFor="workflowName" className="block text-sm font-medium text-gray-700">
+                  Name *
+                </label>
                 <input
                   type="text"
-                  id="workflow-name"
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  id="workflowName"
                   value={workflowName}
                   onChange={(e) => setWorkflowName(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  placeholder="Workflow name"
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                  Description *
+                </label>
+                <textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={2}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  placeholder="Describe the purpose of this workflow"
                 />
               </div>
             </div>
-            <div>
-              <label htmlFor="workflow-description" className="block text-sm font-medium text-gray-700">
-                Description
-              </label>
-              <div className="mt-1">
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Input parameters</h2>
+              {inputParameters.length === 0 ? (
+                <p className="text-sm text-gray-500 mb-2">(empty)</p>
+              ) : (
+                <div className="space-y-2 mb-2">
+                  {inputParameters.map((param, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={param.key}
+                        onChange={(e) => updateInputParameter(index, e.target.value)}
+                        className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        placeholder="Parameter name"
+                      />
+                      <button
+                        onClick={() => removeInputParameter(index)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={addInputParameter}
+                className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Output parameters</h2>
+              {outputParameters.length === 0 ? (
+                <p className="text-sm text-gray-500 mb-2">(empty)</p>
+              ) : (
+                <div className="space-y-2 mb-2">
+                  {outputParameters.map((param, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={param.key}
+                        onChange={(e) => updateOutputParameter(index, e.target.value)}
+                        className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        placeholder="Parameter name"
+                      />
+                      <button
+                        onClick={() => removeOutputParameter(index)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={addOutputParameter}
+                className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Schema</h2>
+              <p className="text-sm text-gray-600 mb-2">JSON schema for input/output validation. <a href="#" className="text-blue-600 hover:text-blue-800">Learn more</a>.</p>
+              
+              <div className="flex items-center mb-4">
+                <label className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="mr-2">Enforce schema</span>
+                  <div className={`relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in ${enforceSchema ? 'bg-blue-600' : 'bg-gray-200'}`} style={{ borderRadius: '20px' }}>
+                    <input
+                      type="checkbox"
+                      name="enforceSchema"
+                      id="enforceSchema"
+                      checked={enforceSchema}
+                      onChange={() => setEnforceSchema(!enforceSchema)}
+                      className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-2 appearance-none cursor-pointer"
+                      style={{ top: '1px', left: enforceSchema ? '21px' : '1px', transition: 'left 0.2s' }}
+                    />
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Workflow flags</h2>
+              
+              <div className="flex items-center mb-4">
+                <label className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="mr-2">Restartable</span>
+                  <div className={`relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in ${isRestartable ? 'bg-blue-600' : 'bg-gray-200'}`} style={{ borderRadius: '20px' }}>
+                    <input
+                      type="checkbox"
+                      name="restartable"
+                      id="restartable"
+                      checked={isRestartable}
+                      onChange={() => setIsRestartable(!isRestartable)}
+                      className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-2 appearance-none cursor-pointer"
+                      style={{ top: '1px', left: isRestartable ? '21px' : '1px', transition: 'left 0.2s' }}
+                    />
+                  </div>
+                </label>
+              </div>
+              
+              <p className="text-xs text-gray-500 mb-4">
+                If restarting a completed workflow can have side effects, turn this flag off and completed workflows will not be allowed to restart.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label htmlFor="timeoutSeconds" className="block text-sm font-medium text-gray-700">
+                    Timeout seconds
+                  </label>
+                  <input
+                    type="number"
+                    id="timeoutSeconds"
+                    value={timeoutSeconds}
+                    onChange={(e) => setTimeoutSeconds(e.target.value)}
+                    min="0"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="timeoutPolicy" className="block text-sm font-medium text-gray-700">
+                    Timeout policy
+                  </label>
+                  <select
+                    id="timeoutPolicy"
+                    value={timeoutPolicy}
+                    onChange={(e) => setTimeoutPolicy(e.target.value)}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  >
+                    <option value="Alert Only">Alert Only</option>
+                    <option value="Time Out">Time Out</option>
+                    <option value="Alert and Time Out">Alert and Time Out</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label htmlFor="failureWorkflowName" className="block text-sm font-medium text-gray-700">
+                  Failure workflow name
+                </label>
                 <input
                   type="text"
-                  id="workflow-description"
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                  value={workflowDescription}
-                  onChange={(e) => setWorkflowDescription(e.target.value)}
+                  id="failureWorkflowName"
+                  value={failureWorkflowName}
+                  onChange={(e) => setFailureWorkflowName(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  placeholder="Enter workflow name to trigger on failure"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  If present, this workflow will be triggered upon a failure of the execution of this workflow.
+                </p>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="bg-white shadow rounded-lg mb-6">
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex">
-              <button
-                className={`${
-                  configTab === 'keyFields'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } flex-1 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center justify-center`}
-                onClick={() => setConfigTab('keyFields')}
-              >
-                <List className="mr-2 h-4 w-4" />
-                Key Fields
-              </button>
-              <button
-                className={`${
-                  configTab === 'inputs'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } flex-1 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center justify-center`}
-                onClick={() => setConfigTab('inputs')}
-              >
-                <FileJson className="mr-2 h-4 w-4" />
-                Input Parameters
-              </button>
-              <button
-                className={`${
-                  configTab === 'outputs'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } flex-1 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center justify-center`}
-                onClick={() => setConfigTab('outputs')}
-              >
-                <Code className="mr-2 h-4 w-4" />
-                Output Parameters
-              </button>
-              <button
-                className={`${
-                  configTab === 'settings'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } flex-1 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center justify-center`}
-                onClick={() => setConfigTab('settings')}
-              >
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </button>
-            </nav>
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Workflow status listener</h2>
+              
+              <div className="flex items-center mb-4">
+                <label className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="mr-2">Workflow status listener enabled</span>
+                  <div className={`relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in ${statusListenerEnabled ? 'bg-blue-600' : 'bg-gray-200'}`} style={{ borderRadius: '20px' }}>
+                    <input
+                      type="checkbox"
+                      name="statusListener"
+                      id="statusListener"
+                      checked={statusListenerEnabled}
+                      onChange={() => setStatusListenerEnabled(!statusListenerEnabled)}
+                      className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-2 appearance-none cursor-pointer"
+                      style={{ top: '1px', left: statusListenerEnabled ? '21px' : '1px', transition: 'left 0.2s' }}
+                    />
+                  </div>
+                </label>
+              </div>
+            </div>
           </div>
-          <div className="p-6">
-            {configTab === 'keyFields' && (
-              <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-3">
+
+          <div className="bg-white rounded-lg shadow-sm mb-4">
+            <div className="p-4">
+              <h2 className="text-sm font-medium text-gray-700 mb-4">Workflow Key</h2>
+              <div className="grid grid-cols-2 gap-4">
                 {renderFormField('market')}
                 {renderFormField('language')}
                 {renderFormField('client')}
@@ -1013,25 +971,64 @@ export default function CreateWorkflow() {
                 {renderFormField('placement')}
                 {renderFormField('domain')}
               </div>
-            )}
-            {configTab === 'inputs' && renderInputParametersTab()}
-            {configTab === 'outputs' && renderOutputParametersTab()}
-            {configTab === 'settings' && renderSettingsTab()}
+              <div className="text-sm text-gray-500 mt-4 p-2 bg-gray-50 rounded border border-gray-200">
+                <span className="font-medium">Generated Key:</span> {generateKey() || <span className="italic text-gray-400">Complete selections above to generate key</span>}
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Workflow Designer</h2>
-          <div className="border border-gray-300 rounded-lg" style={{height: '600px'}}>
-            <WorkflowDesigner 
-              nodes={nodes}
-              edges={edges}
-              setNodes={setNodes}
-              setEdges={setEdges}
-            />
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => document.getElementById('import-json-input')?.click()}
+                className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700"
+              >
+                <UploadIcon size={16} />
+                Import
+              </button>
+              <input
+                type="file"
+                id="import-json-input"
+                accept=".json"
+                style={{ display: 'none' }}
+                onChange={handleImport}
+              />
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isExportDisabled}
+              >
+                <Download size={20} />
+                Export
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaveDisabled}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save size={20} />
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
         </div>
-      </main>
+      </div>
+
+      <style jsx>{`
+        .toggle-checkbox:checked {
+          right: 0;
+          border-color: white;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+          background-color: #4F46E5;
+        }
+      `}</style>
     </div>
   );
 }
