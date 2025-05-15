@@ -1374,3 +1374,112 @@ function ApproveWorkflow({ onStatusChange }: ApproveWorkflowProps) {
 
 export default ApproveWorkflow;
 
+
+=======================
+
+
+
+// Add this code to the WorkflowDesigner component props
+interface Props {
+  // ... existing props
+  readOnly?: boolean;  // Add this
+}
+
+// Inside the component function declaration, update to include readOnly
+export default function WorkflowDesigner({ 
+  nodes, 
+  edges, 
+  onNodesChange, 
+  onEdgesChange,
+  nodeShape = "rectangle",
+  nodeBorderRadius = 4,
+  onNodeSelected,
+  selectedNodeId: externalSelectedNodeId,
+  readOnly = false  // Initialize with default value
+}: Props) {
+  // ... existing code
+  
+  // Modify the node rendering to disable editing in read-only mode
+  // In the nodes.map function, add this condition:
+  
+  return (
+    <div
+      key={node.id}
+      className={`absolute transition-shadow duration-100 ease-in-out ${
+        isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : 'ring-0'
+      } ${draggedNode?.id === node.id ? 'shadow-xl' : 'shadow-md'}`}
+      style={{
+        width,
+        height,
+        transform: `translate(${topLeftX}px, ${topLeftY}px)`,
+        cursor: readOnly ? 'default' : (isConnecting ? 'crosshair' : (isEditing ? 'text' : 'move')),
+        zIndex: draggedNode?.id === node.id ? 10 : (isSelected ? 5 : 1),
+        borderRadius: `${borderRadius}px`,
+        background: node.backgroundColor || 'white',
+        border: `2px solid ${nodeColor}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+      }}
+      onMouseDown={readOnly ? (e) => {
+        e.stopPropagation();
+        // Only allow selection in read-only mode
+        if (onNodeSelected) {
+          const newSelectedNodeId = node.id === selectedNode ? null : node.id;
+          setSelectedNode(newSelectedNodeId);
+          onNodeSelected(newSelectedNodeId);
+        }
+      } : (e) => handleNodeMouseDown(node, e)}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* ... existing node content */}
+      
+      {/* Only show editing controls if not in read-only mode */}
+      {!readOnly && (
+        <>
+          {/* Plus button for connecting */}
+          <div
+            className="absolute -bottom-4 left-1/2 transform -translate-x-1/2 bg-white rounded-full shadow-md border border-gray-200 w-8 h-8 flex items-center justify-center cursor-pointer hover:bg-gray-50"
+            onClick={(e) => startConnecting(node.id, e)}
+          >
+            <Plus size={16} className="text-blue-500" />
+          </div>
+
+          {isSelected && !isEditing && (
+            <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 flex gap-1 bg-white rounded-md shadow-lg p-1 z-20">
+              <button
+                onClick={(e) => { e.stopPropagation(); resizeNode(node.id, true); }}
+                className="p-1 hover:bg-gray-100 rounded"
+                title="Increase size"
+              >
+                <Maximize2 size={14} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); resizeNode(node.id, false); }}
+                className="p-1 hover:bg-gray-100 rounded"
+                title="Decrease size"
+              >
+                <Minimize2 size={14} />
+              </button>
+              <button
+                onClick={(e) => startEditing(node, e)}
+                className="p-1 hover:bg-gray-100 rounded"
+                title="Edit Text"
+              >
+                <Edit2 size={14} />
+              </button>
+              <button
+                onClick={(e) => deleteNode(node.id, e)}
+                className="p-1 hover:bg-gray-100 rounded text-red-500"
+                title="Delete Node"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
